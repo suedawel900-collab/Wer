@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>MK BINGO</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body{font-family:Arial;background:#111;color:white;text-align:center}
+button{padding:12px 20px;margin:5px;font-size:18px}
+#board{display:grid;grid-template-columns:repeat(5,60px);gap:5px;justify-content:center}
+.cell{background:#333;padding:20px}
+</style>
+</head>
+
+<body>
+
+<h1>🎱 MK BINGO</h1>
+
+<div id="board"></div>
+
+<h2 id="number">Waiting...</h2>
+
+<button onclick="join()">Join Game</button>
+<button onclick="bingo()">BINGO</button>
+
+<script src="/socket.io/socket.io.js"></script>
+
+<script>
+
+const socket = io()
+
+let board = document.getElementById("board")
+
+function createCard(){
+
+board.innerHTML=""
+
+for(let i=0;i<25;i++){
+
+let num=Math.floor(Math.random()*75)+1
+
+let div=document.createElement("div")
+
+div.className="cell"
+
+div.innerText=num
+
+board.appendChild(div)
+
+}
+
+}
+
+createCard()
+
+socket.on("number",(n)=>{
+
+document.getElementById("number").innerText="Number: "+n
+
+})
+
+function join(){
+
+socket.emit("join",{name:"player"})
+
+}
+
+function bingo(){
+
+socket.emit("bingo",{name:"player"})
+
+}
+
+socket.on("winner",(p)=>{
+
+alert("Winner: "+p.name)
+
+})
+
+</script>
+
+</body>
+</html>
