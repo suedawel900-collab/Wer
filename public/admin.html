@@ -1,0 +1,16 @@
+<h1>MK BINGO ADMIN</h1>
+
+<button onclick="start()">Start Game</button>
+<button onclick="call()">Call Number</button>
+
+<script>
+
+function start(){
+fetch("/admin/start")
+}
+
+function call(){
+fetch("/admin/call")
+}
+
+</script>
