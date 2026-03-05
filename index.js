@@ -1,201 +1,209 @@
-require('dotenv').config();
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
+const express = require("express")
+const http = require("http")
+const { Server } = require("socket.io")
+const cors = require("cors")
+const fs = require("fs")
 
-const app = express();
-const server = http.createServer(app);
+const app = express()
+const server = http.createServer(app)
 
 const io = new Server(server,{
-  cors:{ origin:"*", methods:["GET","POST"] }
-});
+    cors:{origin:"*"}
+})
 
-app.use(cors());
-app.use(express.json());
+app.use(cors())
+app.use(express.json())
+app.use(express.static("public"))
 
-/* ------------------------------
-   BASIC ROUTE (Fix Cannot GET /)
---------------------------------*/
-app.get("/",(req,res)=>{
-  res.send("🎱 MK BINGO SERVER RUNNING");
-});
+/* ---------------- DATABASE ---------------- */
 
-/* ------------------------------
-   IN MEMORY DATABASE
---------------------------------*/
-const users = {};
-const rooms = {};
-
-const JWT_SECRET = "mk_bingo_secret";
-
-/* ------------------------------
-   HELPERS
---------------------------------*/
-
-function generateCard(){
-  const ranges=[[1,15],[16,30],[31,45],[46,60],[61,75]];
-  const card=ranges.map(([lo,hi])=>{
-    const nums=[];
-    while(nums.length<5){
-      const n=Math.floor(Math.random()*(hi-lo+1))+lo;
-      if(!nums.includes(n)) nums.push(n);
-    }
-    return nums;
-  });
-
-  card[2][2]=0;
-  return card;
+function read(file){
+    if(!fs.existsSync(file)) return []
+    return JSON.parse(fs.readFileSync(file))
 }
 
-function generatePool(){
-  const arr=Array.from({length:75},(_,i)=>i+1);
-  for(let i=arr.length-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [arr[i],arr[j]]=[arr[j],arr[i]];
-  }
-  return arr;
+function write(file,data){
+    fs.writeFileSync(file,JSON.stringify(data,null,2))
 }
 
-/* ------------------------------
-   AUTH
---------------------------------*/
+/* ---------------- TELEGRAM LOGIN ---------------- */
 
-app.post("/api/register",async(req,res)=>{
+app.post("/login",(req,res)=>{
+    const {telegramId,username} = req.body
 
-  const {username,email,password}=req.body;
+    let users = read("data/users.json")
 
-  if(!username||!email||!password)
-  return res.status(400).json({error:"Missing fields"});
+    let user = users.find(u=>u.telegramId==telegramId)
 
-  const id=uuidv4();
-  const hash=await bcrypt.hash(password,10);
+    if(!user){
+        user={
+            id:Date.now(),
+            telegramId,
+            username,
+            balance:10
+        }
 
-  users[id]={
-    id,
-    username,
-    email,
-    password:hash,
-    balance:100,
-    gamesWon:0,
-    gamesPlayed:0
-  };
-
-  const token=jwt.sign({id},JWT_SECRET);
-
-  res.json({token,user:{id,username,email,balance:100}});
-});
-
-
-app.post("/api/login",async(req,res)=>{
-
-  const {email,password}=req.body;
-
-  const user=Object.values(users).find(u=>u.email===email);
-
-  if(!user) return res.status(400).json({error:"Invalid login"});
-
-  const ok=await bcrypt.compare(password,user.password);
-
-  if(!ok) return res.status(400).json({error:"Invalid login"});
-
-  const token=jwt.sign({id:user.id},JWT_SECRET);
-
-  res.json({
-    token,
-    user:{
-      id:user.id,
-      username:user.username,
-      email:user.email,
-      balance:user.balance
+        users.push(user)
+        write("data/users.json",users)
     }
-  });
 
-});
+    res.json(user)
+})
 
+/* ---------------- DEPOSIT ---------------- */
 
-/* ------------------------------
-   ROOMS
---------------------------------*/
+app.post("/deposit",(req,res)=>{
 
-app.post("/api/create-room",(req,res)=>{
+    const {userId,amount,method} = req.body
 
-  const code=Math.random().toString(36).substring(2,7).toUpperCase();
+    let deposits = read("data/deposits.json")
 
-  rooms[code]={
-    code,
-    host:null,
-    players:{},
-    pool:generatePool(),
-    called:[],
-    status:"waiting"
-  };
+    const dep={
+        id:Date.now(),
+        userId,
+        amount,
+        method,
+        status:"pending",
+        date:new Date()
+    }
 
-  res.json({code});
-});
+    deposits.push(dep)
 
-app.get("/api/rooms",(req,res)=>{
-  res.json(Object.values(rooms));
-});
+    write("data/deposits.json",deposits)
 
+    res.json({message:"Deposit request sent"})
+})
 
-/* ------------------------------
-   SOCKET.IO
---------------------------------*/
+/* ---------------- WITHDRAW ---------------- */
+
+app.post("/withdraw",(req,res)=>{
+
+    const {userId,amount} = req.body
+
+    let withdrawals = read("data/withdrawals.json")
+
+    withdrawals.push({
+        id:Date.now(),
+        userId,
+        amount,
+        status:"pending",
+        date:new Date()
+    })
+
+    write("data/withdrawals.json",withdrawals)
+
+    res.json({message:"Withdraw request sent"})
+})
+
+/* ---------------- ADMIN APPROVE ---------------- */
+
+app.post("/admin/approveDeposit",(req,res)=>{
+
+    const {depositId} = req.body
+
+    let deposits = read("data/deposits.json")
+    let users = read("data/users.json")
+
+    let dep = deposits.find(d=>d.id==depositId)
+
+    if(dep){
+
+        dep.status="approved"
+
+        let user = users.find(u=>u.id==dep.userId)
+
+        user.balance += dep.amount
+
+        write("data/deposits.json",deposits)
+        write("data/users.json",users)
+    }
+
+    res.json({success:true})
+})
+
+/* ---------------- BINGO GAME ---------------- */
+
+let players=[]
+let numbers=[]
+let called=[]
+
+function startGame(){
+
+    numbers = Array.from({length:75},(_,i)=>i+1)
+    called=[]
+
+}
+
+function callNumber(){
+
+    if(numbers.length==0) return
+
+    const index=Math.floor(Math.random()*numbers.length)
+
+    const num=numbers.splice(index,1)[0]
+
+    called.push(num)
+
+    io.emit("number",num)
+}
+
+/* ---------------- SOCKET ---------------- */
 
 io.on("connection",(socket)=>{
 
-  console.log("Player connected");
+    socket.on("join",(player)=>{
 
-  socket.on("joinRoom",({roomCode,username})=>{
+        players.push(player)
 
-    const room=rooms[roomCode];
-    if(!room) return;
+        io.emit("players",players)
 
-    socket.join(roomCode);
+    })
 
-    room.players[socket.id]={
-      id:socket.id,
-      username,
-      card:generateCard(),
-      marked:Array.from({length:5},()=>Array(5).fill(false))
-    };
+    socket.on("bingo",(player)=>{
 
-    socket.emit("card",room.players[socket.id].card);
+        io.emit("winner",player)
 
-    io.to(roomCode).emit("players",Object.values(room.players));
+        let history = read("data/history.json")
 
-  });
+        history.push({
+            winner:player,
+            date:new Date()
+        })
 
-  socket.on("callNumber",(roomCode)=>{
+        write("data/history.json",history)
+    })
 
-    const room=rooms[roomCode];
-    if(!room) return;
+})
 
-    const num=room.pool.pop();
+/* ---------------- ADMIN GAME CONTROL ---------------- */
 
-    room.called.push(num);
+app.get("/admin/start",(_,res)=>{
 
-    io.to(roomCode).emit("number",num);
+    startGame()
 
-  });
+    res.send("game started")
+})
 
-  socket.on("disconnect",()=>{
-    console.log("Player disconnected");
-  });
+app.get("/admin/call",(_,res)=>{
 
-});
+    callNumber()
 
+    res.send("number called")
+})
 
-/* ------------------------------
-   START SERVER
---------------------------------*/
+/* ---------------- HISTORY ---------------- */
 
-const PORT=process.env.PORT||8080;
+app.get("/history",(req,res)=>{
+
+    res.json(read("data/history.json"))
+})
+
+/* ---------------- SERVER ---------------- */
+
+const PORT = process.env.PORT || 8080
 
 server.listen(PORT,()=>{
-  console.log(`🎱 Bingo server running on port ${PORT}`);
-});
+
+    console.log("🎱 MK BINGO SERVER RUNNING")
+
+})
