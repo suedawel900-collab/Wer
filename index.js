@@ -1,3 +1,5 @@
+require("dotenv").config()
+
 const express = require("express")
 const http = require("http")
 const { Server } = require("socket.io")
@@ -15,7 +17,7 @@ app.use(cors())
 app.use(express.json())
 app.use(express.static("public"))
 
-/* ---------------- DATABASE ---------------- */
+/* ---------------- FILE DATABASE ---------------- */
 
 function read(file){
     if(!fs.existsSync(file)) return []
@@ -26,9 +28,16 @@ function write(file,data){
     fs.writeFileSync(file,JSON.stringify(data,null,2))
 }
 
+/* ---------------- HOME ---------------- */
+
+app.get("/",(req,res)=>{
+    res.send("🎱 MK BINGO SERVER RUNNING")
+})
+
 /* ---------------- TELEGRAM LOGIN ---------------- */
 
 app.post("/login",(req,res)=>{
+
     const {telegramId,username} = req.body
 
     let users = read("data/users.json")
@@ -36,6 +45,7 @@ app.post("/login",(req,res)=>{
     let user = users.find(u=>u.telegramId==telegramId)
 
     if(!user){
+
         user={
             id:Date.now(),
             telegramId,
@@ -44,6 +54,7 @@ app.post("/login",(req,res)=>{
         }
 
         users.push(user)
+
         write("data/users.json",users)
     }
 
@@ -95,7 +106,7 @@ app.post("/withdraw",(req,res)=>{
     res.json({message:"Withdraw request sent"})
 })
 
-/* ---------------- ADMIN APPROVE ---------------- */
+/* ---------------- ADMIN APPROVE DEPOSIT ---------------- */
 
 app.post("/admin/approveDeposit",(req,res)=>{
 
@@ -112,7 +123,9 @@ app.post("/admin/approveDeposit",(req,res)=>{
 
         let user = users.find(u=>u.id==dep.userId)
 
-        user.balance += dep.amount
+        if(user){
+            user.balance += dep.amount
+        }
 
         write("data/deposits.json",deposits)
         write("data/users.json",users)
@@ -131,7 +144,6 @@ function startGame(){
 
     numbers = Array.from({length:75},(_,i)=>i+1)
     called=[]
-
 }
 
 function callNumber(){
@@ -150,6 +162,8 @@ function callNumber(){
 /* ---------------- SOCKET ---------------- */
 
 io.on("connection",(socket)=>{
+
+    console.log("Player connected")
 
     socket.on("join",(player)=>{
 
@@ -173,22 +187,25 @@ io.on("connection",(socket)=>{
         write("data/history.json",history)
     })
 
+    socket.on("disconnect",()=>{
+        console.log("Player disconnected")
+    })
 })
 
 /* ---------------- ADMIN GAME CONTROL ---------------- */
 
-app.get("/admin/start",(_,res)=>{
+app.get("/admin/start",(req,res)=>{
 
     startGame()
 
-    res.send("game started")
+    res.send("Game started")
 })
 
-app.get("/admin/call",(_,res)=>{
+app.get("/admin/call",(req,res)=>{
 
     callNumber()
 
-    res.send("number called")
+    res.send("Number called")
 })
 
 /* ---------------- HISTORY ---------------- */
@@ -202,7 +219,7 @@ app.get("/history",(req,res)=>{
 
 const PORT = process.env.PORT || 8080
 
-server.listen(PORT,()=>{
+server.listen(PORT,"0.0.0.0",()=>{
 
     console.log("🎱 MK BINGO SERVER RUNNING")
 
